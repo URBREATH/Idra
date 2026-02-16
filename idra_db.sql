@@ -100,6 +100,21 @@ LOCK TABLES `dcat_agent` WRITE;
 /*!40000 ALTER TABLE `dcat_agent` ENABLE KEYS */;
 UNLOCK TABLES;
 
+-- DCAT_AGENT: remove old name column because of DCAT-AP v3.0.0; 
+ALTER TABLE `dcat_agent`
+  DROP COLUMN `name`;
+  
+-- add name‐list table dcat_agent_name
+DROP TABLE IF EXISTS `dcat_agent_name`;
+CREATE TABLE dcat_agent_name (
+  `agent_id`  VARCHAR(255) NOT NULL,
+  `nodeID`    VARCHAR(255) NOT NULL,
+  `name`      VARCHAR(255) DEFAULT NULL
+  -- KEY `FK_an_agent` (`agent_id`),
+  -- CONSTRAINT `FK_an_agent` FOREIGN KEY (`agent_id`) REFERENCES dcat_agent(`agent_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+LOCK TABLES `dcat_agent_name` WRITE; UNLOCK TABLES;
+
 --
 -- Table structure for table `dcat_checksum`
 --
@@ -230,6 +245,18 @@ LOCK TABLES `dcat_dataset` WRITE;
 /*!40000 ALTER TABLE `dcat_dataset` ENABLE KEYS */;
 UNLOCK TABLES;
 
+-- DCAT_DATASET: add new FKs & columns because of DCAT-AP v3.0.0
+ALTER TABLE `dcat_dataset`
+  ADD COLUMN  `data_service_id`        VARCHAR(255) DEFAULT NULL,
+  ADD COLUMN  `relationship_id`        VARCHAR(255) DEFAULT NULL,
+  ADD COLUMN  `temporalResolution`     VARCHAR(255) DEFAULT NULL,
+  ADD KEY  `FK_ds_service`        (`data_service_id`),
+  ADD KEY  `FK_ds_qualrel`        (`relationship_id`),
+  ADD CONSTRAINT `FK_ds_service` FOREIGN KEY (`data_service_id`)
+    REFERENCES `dcat_data_service`(`data_service_id`),
+  ADD CONSTRAINT `FK_ds_qualrel` FOREIGN KEY (`relationship_id`)
+    REFERENCES `dcat_relationship`(`relationship_id`);
+
 --
 -- Table structure for table `dcat_distribution`
 --
@@ -280,6 +307,15 @@ LOCK TABLES `dcat_distribution` WRITE;
 /*!40000 ALTER TABLE `dcat_distribution` DISABLE KEYS */;
 /*!40000 ALTER TABLE `dcat_distribution` ENABLE KEYS */;
 UNLOCK TABLES;
+
+-- DCAT_DISTRIBUTION: add new columns because of DCAT-AP v3.0.0
+ALTER TABLE `dcat_distribution`
+  ADD COLUMN  `availability`       VARCHAR(255) DEFAULT NULL,
+  ADD COLUMN  `compressionFormat`  VARCHAR(255) DEFAULT NULL,
+  ADD COLUMN  `hasPolicy`          VARCHAR(255) DEFAULT NULL,
+  ADD COLUMN  `packagingFormat`    VARCHAR(255) DEFAULT NULL,
+  ADD COLUMN  `spatialResolution`  VARCHAR(255) DEFAULT NULL,
+  ADD COLUMN  `temporalResolution` VARCHAR(255) DEFAULT NULL;
 
 --
 -- Table structure for table `dcat_distribution_documentation`
@@ -506,6 +542,12 @@ LOCK TABLES `dcat_location` WRITE;
 /*!40000 ALTER TABLE `dcat_location` ENABLE KEYS */;
 UNLOCK TABLES;
 
+-- DCAT_LOCATION: add bbox & centroid if missing because of DCAT-AP v3.0.0
+ALTER TABLE `dcat_location`
+  ADD COLUMN  `bbox`       VARCHAR(255) DEFAULT NULL,
+  ADD COLUMN  `centroid`   VARCHAR(255) DEFAULT NULL,
+  ADD COLUMN  `dataset_id` VARCHAR(255) DEFAULT NULL;
+
 --
 -- Table structure for table `dcat_otheridentifier`
 --
@@ -557,6 +599,12 @@ LOCK TABLES `dcat_periodoftime` WRITE;
 /*!40000 ALTER TABLE `dcat_periodoftime` ENABLE KEYS */;
 UNLOCK TABLES;
 
+-- DCAT_PERIODOFTIME: add beginning & end if missing because of DCAT-AP v3.0.0
+ALTER TABLE `dcat_periodoftime`
+  ADD COLUMN  `beginning`  VARCHAR(255) DEFAULT NULL,
+  ADD COLUMN  `end`        VARCHAR(255) DEFAULT NULL,
+  ADD COLUMN  `dataset_id` VARCHAR(255) DEFAULT NULL;
+
 --
 -- Table structure for table `dcat_provenance`
 --
@@ -593,7 +641,7 @@ CREATE TABLE `dcat_relatedresource` (
   `dataset_id` varchar(255) NOT NULL,
   `nodeID` varchar(255) NOT NULL,
   `relatedResource` longtext
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -836,7 +884,7 @@ CREATE TABLE `distribution_additional_config` (
   `fiwareService` varchar(255) DEFAULT NULL,
   `fiwareServicePath` varchar(255) DEFAULT NULL,
   PRIMARY KEY (`id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -868,7 +916,7 @@ CREATE TABLE `distribution_datalet` (
   `title` varchar(255) DEFAULT NULL,
   `views` int(11) DEFAULT NULL,
   PRIMARY KEY (`id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -879,6 +927,243 @@ LOCK TABLES `distribution_datalet` WRITE;
 /*!40000 ALTER TABLE `distribution_datalet` DISABLE KEYS */;
 /*!40000 ALTER TABLE `distribution_datalet` ENABLE KEYS */;
 UNLOCK TABLES;
+
+
+-- Table structure for table `dcat_data_service`
+DROP TABLE IF EXISTS `dcat_data_service`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+ SET character_set_client = utf8mb4 ;
+CREATE TABLE `dcat_data_service` (
+  `data_service_id`      VARCHAR(255) NOT NULL,
+  `license`              VARCHAR(255) DEFAULT NULL,
+  `title`                VARCHAR(255) DEFAULT NULL,
+  `dataset_id`           VARCHAR(255) DEFAULT NULL,
+  `nodeID`               VARCHAR(255) DEFAULT NULL,
+  `distribution_id`      VARCHAR(255) DEFAULT NULL,
+  PRIMARY KEY (`data_service_id`),
+  KEY `FK_ds_dataset` (`dataset_id`,`nodeID`),
+  KEY `FK_ds_distribution` (`distribution_id`),
+  CONSTRAINT `FK_ds_dataset` FOREIGN KEY (`dataset_id`,`nodeID`)
+    REFERENCES `dcat_dataset`(`dataset_id`,`nodeID`),
+  CONSTRAINT `FK_ds_distribution` FOREIGN KEY (`distribution_id`)
+    REFERENCES `dcat_distribution`(`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+LOCK TABLES `dcat_data_service` WRITE; UNLOCK TABLES;
+
+-- Table structure for table `dcat_applicable_legislation`
+DROP TABLE IF EXISTS `dcat_applicable_legislation`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+ SET character_set_client = utf8mb4 ;
+CREATE TABLE `dcat_applicable_legislation` (
+  `dataset_id`            VARCHAR(255) NOT NULL,
+  `nodeID`                VARCHAR(255) NOT NULL,
+  -- `distribution_id`       VARCHAR(255) DEFAULT NULL,
+  `applicableLegislation` VARCHAR(255) DEFAULT NULL,
+  KEY `FK_al_dataset` (`dataset_id`,`nodeID`),
+  -- KEY `FK_dal_distribution` (`distribution_id`),
+  CONSTRAINT `FK_al_dataset` FOREIGN KEY (`dataset_id`,`nodeID`)
+    REFERENCES `dcat_dataset`(`dataset_id`,`nodeID`) ON DELETE CASCADE
+  -- CONSTRAINT `FK_dal_distribution` FOREIGN KEY (`distribution_id`)
+  --  REFERENCES `dcat_distribution`(`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+LOCK TABLES `dcat_applicable_legislation` WRITE; UNLOCK TABLES;
+
+-- Table structure for table `dcat_distribution_applicable_legislation`
+DROP TABLE IF EXISTS `dcat_distribution_applicable_legislation`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+ SET character_set_client = utf8mb4 ;
+CREATE TABLE `dcat_distribution_applicable_legislation` (
+  -- `dataset_id`            VARCHAR(255) NOT NULL,
+  `distribution_id`       VARCHAR(255) NOT NULL,
+  `nodeID`                VARCHAR(255) NOT NULL,
+  `applicableLegislation` VARCHAR(255) DEFAULT NULL,
+  -- KEY `FK_al_dataset` (`dataset_id`,`nodeID`),
+  KEY `FK_dal_distribution` (`distribution_id`),
+  -- CONSTRAINT `FK_al_dataset` FOREIGN KEY (`dataset_id`,`nodeID`)
+  --  REFERENCES `dcat_dataset`(`dataset_id`,`nodeID`),
+  CONSTRAINT `FK_dal_distribution` FOREIGN KEY (`distribution_id`)
+    REFERENCES `dcat_distribution`(`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+LOCK TABLES `dcat_distribution_applicable_legislation` WRITE; UNLOCK TABLES;
+
+-- Table structure for table `odms_applicable_legislation`
+DROP TABLE IF EXISTS `odms_applicable_legislation`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+ SET character_set_client = utf8mb4 ;
+CREATE TABLE `odms_applicable_legislation` (
+  `nodeID` 				  INT(11) NOT NULL,
+  `applicableLegislation` VARCHAR(255) DEFAULT NULL,
+  KEY `FK_cat_al_catalogue` (`nodeID`),
+  CONSTRAINT `FK_cat_al_catalogue` FOREIGN KEY (`nodeID`)
+    REFERENCES `odms`(`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+LOCK TABLES `odms_applicable_legislation` WRITE; UNLOCK TABLES;
+
+-- Table structure for table `dcat_endpoint`
+DROP TABLE IF EXISTS `dcat_endpoint`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+ SET character_set_client = utf8mb4 ;
+CREATE TABLE `dcat_endpoint` (
+  -- `dataset_id`           VARCHAR(255) NOT NULL,
+  `data_service_id`      VARCHAR(255) NOT NULL,
+  `nodeID`               VARCHAR(255) NOT NULL,
+  `description`          VARCHAR(255) DEFAULT NULL,
+  `url`                  longtext, -- VARCHAR(255) DEFAULT NULL,
+  KEY `FK_ep_dataset` (`data_service_id`), -- (`dataset_id`,`nodeID`),
+  CONSTRAINT `FK_ep_dataset` FOREIGN KEY (`data_service_id`)
+  REFERENCES `dcat_data_service`(`data_service_id`) ON DELETE CASCADE
+  -- CONSTRAINT `FK_ep_dataset` FOREIGN KEY (`dataset_id`,`nodeID`)
+   -- REFERENCES `dcat_dataset`(`dataset_id`,`nodeID`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+LOCK TABLES `dcat_endpoint` WRITE; UNLOCK TABLES;
+
+-- Table structure for table `dcat_hvd_category` 
+DROP TABLE IF EXISTS `dcat_hvd_category`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+ SET character_set_client = utf8mb4 ;
+CREATE TABLE `dcat_hvd_category` (
+  `dataset_id`           VARCHAR(255) NOT NULL,
+  `nodeID`               VARCHAR(255) NOT NULL,
+  `HVDCategory`          VARCHAR(255) DEFAULT NULL,
+  KEY `FK_hvd_dataset` (`dataset_id`,`nodeID`),
+  CONSTRAINT `FK_hvd_dataset` FOREIGN KEY (`dataset_id`,`nodeID`)
+    REFERENCES `dcat_dataset`(`dataset_id`,`nodeID`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+LOCK TABLES `dcat_hvd_category` WRITE; UNLOCK TABLES;
+
+-- Table structure for table `dcat_rights` 
+DROP TABLE IF EXISTS `dcat_rights`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+ SET character_set_client = utf8mb4 ;
+CREATE TABLE `dcat_rights` (
+  -- `dataset_id`           VARCHAR(255) NOT NULL,
+  `data_service_id`      VARCHAR(255) NOT NULL,
+  `nodeID`               VARCHAR(255) NOT NULL,
+  `rights`               VARCHAR(255) DEFAULT NULL,
+  KEY `FK_r_dataset` (`data_service_id`), -- (`dataset_id`,`nodeID`),
+  CONSTRAINT `FK_r_dataset` FOREIGN KEY (`data_service_id`)
+   REFERENCES `dcat_data_service`(`data_service_id`) ON DELETE CASCADE
+  -- CONSTRAINT `FK_r_dataset` FOREIGN KEY (`dataset_id`,`nodeID`)
+   -- REFERENCES `dcat_dataset`(`dataset_id`,`nodeID`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+LOCK TABLES `dcat_rights` WRITE; UNLOCK TABLES;
+
+-- Table structure for table `dcat_catalogue_record`
+DROP TABLE IF EXISTS `dcat_catalogue_record`;
+CREATE TABLE `dcat_catalogue_record` (
+  `catalogue_record_id`  VARCHAR(255) NOT NULL,
+  `nodeID`               INT(11) NOT NULL,
+  `changeType`           VARCHAR(255) DEFAULT NULL,
+  `listingDate`          VARCHAR(255) DEFAULT NULL,
+  `modificationDate`     VARCHAR(255) DEFAULT NULL,
+  `primaryTopic`         VARCHAR(255) DEFAULT NULL,
+  PRIMARY KEY (`catalogue_record_id`),
+  KEY `FK_r_catalogue` (`nodeID`),
+  CONSTRAINT `FK_r_catalogue` FOREIGN KEY (`nodeID`)
+    REFERENCES `odms`(`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+LOCK TABLES `dcat_catalogue_record` WRITE; UNLOCK TABLES;
+
+-- Table structure for table `dcat_dataset_series`
+DROP TABLE IF EXISTS `dcat_dataset_series`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+ SET character_set_client = utf8mb4 ;
+CREATE TABLE `dcat_dataset_series` (
+  `dataset_series_id`       VARCHAR(255) NOT NULL,
+  `dataset_id`              VARCHAR(255) DEFAULT NULL,
+  `nodeID`                  VARCHAR(255) DEFAULT NULL,
+  `frequency`               VARCHAR(255) DEFAULT NULL,
+  `modificationDate`        VARCHAR(255) DEFAULT NULL,
+  `releaseDate`             VARCHAR(255) DEFAULT NULL,
+  `publisher_id`            VARCHAR(255) DEFAULT NULL,
+  `geographicalCoverage_id` VARCHAR(255) DEFAULT NULL,
+  `temporalCoverage_id`     VARCHAR(255) DEFAULT NULL,
+  PRIMARY KEY (`dataset_series_id`),
+  KEY `FK_dsrs_dataset` (`dataset_id`,`nodeID`),
+  KEY `FK_dsrs_publisher` (`publisher_id`),
+  KEY `FK_dsrs_geo` (`geographicalCoverage_id`),
+  KEY `FK_dsrs_temp` (`temporalCoverage_id`),
+  CONSTRAINT `FK_dsrs_dataset` FOREIGN KEY (`dataset_id`,`nodeID`)
+    REFERENCES `dcat_dataset`(`dataset_id`,`nodeID`),
+  CONSTRAINT `FK_dsrs_publisher` FOREIGN KEY (`publisher_id`)
+    REFERENCES `dcat_agent`(`agent_id`),
+  CONSTRAINT `FK_dsrs_geo` FOREIGN KEY (`geographicalCoverage_id`)
+    REFERENCES `dcat_location`(`location_id`),
+  CONSTRAINT `FK_dsrs_temp` FOREIGN KEY (`temporalCoverage_id`)
+    REFERENCES `dcat_periodoftime`(`periodOfTime_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+LOCK TABLES `dcat_dataset_series` WRITE; UNLOCK TABLES;
+
+-- Table structure for table `dcat_details`
+DROP TABLE IF EXISTS `dcat_details`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+ SET character_set_client = utf8mb4 ;
+CREATE TABLE `dcat_details` (
+  `details_id`           VARCHAR(255) NOT NULL,
+  `catalogue_record_id`  VARCHAR(255) DEFAULT NULL,
+  `dataset_series_id`    VARCHAR(255) DEFAULT NULL,
+  `dataset_id`           VARCHAR(255) DEFAULT NULL,
+  `nodeID`               VARCHAR(255) DEFAULT NULL,
+  `description`          VARCHAR(255) DEFAULT NULL,
+  `title`                VARCHAR(255) DEFAULT NULL,
+  `language`             VARCHAR(255) DEFAULT NULL,
+  PRIMARY KEY (`details_id`),
+  KEY `FK_det_dataset` (`dataset_id`,`nodeID`),
+  KEY `FK_det_dsrs` (`dataset_series_id`),
+  KEY `FK_det_catrec` (`catalogue_record_id`),
+  CONSTRAINT `FK_det_catrec` FOREIGN KEY (`catalogue_record_id`)
+    REFERENCES `dcat_catalogue_record`(`catalogue_record_id`),
+  CONSTRAINT `FK_det_dsrs` FOREIGN KEY (`dataset_series_id`)
+    REFERENCES `dcat_dataset_series`(`dataset_series_id`),
+  CONSTRAINT `FK_det_dataset` FOREIGN KEY (`dataset_id`,`nodeID`)
+    REFERENCES `dcat_dataset`(`dataset_id`,`nodeID`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+LOCK TABLES `dcat_details` WRITE; UNLOCK TABLES;
+
+-- Table structure for table `dcat_relationship`
+DROP TABLE IF EXISTS `dcat_relationship`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+ SET character_set_client = utf8mb4 ;
+CREATE TABLE `dcat_relationship` (
+  `relationship_id`       VARCHAR(255) NOT NULL,
+  `dataset_id`            VARCHAR(255) DEFAULT NULL,
+  `nodeID`                VARCHAR(255) DEFAULT NULL,
+  `relation`              VARCHAR(255) DEFAULT NULL,
+  `had_role`              VARCHAR(255) DEFAULT NULL,
+  PRIMARY KEY (`relationship_id`),
+  KEY `FK_qr_dataset` (`dataset_id`,`nodeID`),
+  CONSTRAINT `FK_qr_dataset` FOREIGN KEY (`dataset_id`,`nodeID`)
+   REFERENCES `dcat_dataset`(`dataset_id`,`nodeID`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+LOCK TABLES `dcat_relationship` WRITE; UNLOCK TABLES;
+
+-- Table structure for table `dcat_was_generated_by`
+DROP TABLE IF EXISTS `dcat_was_generated_by`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+ SET character_set_client = utf8mb4 ;
+CREATE TABLE `dcat_was_generated_by` (
+  `dataset_id`            VARCHAR(255) NOT NULL,
+  `nodeID`                VARCHAR(255) NOT NULL,
+  `value`                 VARCHAR(255) DEFAULT NULL,
+  KEY `FK_wgb_dataset` (`dataset_id`,`nodeID`),
+  CONSTRAINT `FK_wgb_dataset` FOREIGN KEY (`dataset_id`,`nodeID`)
+    REFERENCES `dcat_dataset`(`dataset_id`,`nodeID`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+LOCK TABLES `dcat_was_generated_by` WRITE; UNLOCK TABLES;
+
+-- Table structure for table `dcat_serves_dataset` 
+DROP TABLE IF EXISTS `dcat_serves_dataset`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+ SET character_set_client = utf8mb4 ;
+CREATE TABLE `dcat_serves_dataset` (
+  `data_service_id`      VARCHAR(255) NOT NULL,
+  `nodeID`               VARCHAR(255) NOT NULL,
+  `servesDataset`        VARCHAR(255) DEFAULT NULL,
+  KEY `FK_sd_dataset` (`data_service_id`),
+  CONSTRAINT `FK_sd_dataset` FOREIGN KEY (`data_service_id`)
+  REFERENCES `dcat_data_service`(`data_service_id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+LOCK TABLES `dcat_serves_dataset` WRITE; UNLOCK TABLES;
 
 --
 -- Table structure for table `eurovoc_terms`
@@ -916,7 +1201,7 @@ CREATE TABLE `eurovoc_terms` (
   `MK` varchar(255) DEFAULT NULL,
   `SQ` varchar(255) DEFAULT NULL,
   `SR` varchar(255) DEFAULT NULL
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -1123,6 +1408,21 @@ LOCK TABLES `odms` WRITE;
 /*!40000 ALTER TABLE `odms` ENABLE KEYS */;
 UNLOCK TABLES;
 
+-- ODMS: add new FKs & columns because of DCAT-AP v3.0.0
+ALTER TABLE `odms` 
+  ADD COLUMN `creator_id`               VARCHAR(255) DEFAULT NULL,
+  ADD COLUMN `geographicalCoverage_id`  VARCHAR(255) DEFAULT NULL,
+  ADD COLUMN `temporalCoverage_id`      VARCHAR(255) DEFAULT NULL,
+  ADD KEY `FK_cat_creator`              (`creator_id`),
+  ADD KEY `FK_cat_geo`  				(`geographicalCoverage_id`),
+  ADD KEY `FK_cat_temp`      			(`temporalCoverage_id`),
+  ADD CONSTRAINT `FK_cat_creator` FOREIGN KEY (`creator_id`)
+    REFERENCES `dcat_agent`(`agent_id`),
+  ADD CONSTRAINT `FK_cat_geo` FOREIGN KEY (`geographicalCoverage_id`)
+    REFERENCES `dcat_location`(`location_id`),
+  ADD CONSTRAINT `FK_cat_temp` FOREIGN KEY (`temporalCoverage_id`)
+    REFERENCES `dcat_periodoftime`(`periodOfTime_id`);
+
 --
 -- Table structure for table `odms_additional_config`
 --
@@ -1142,7 +1442,7 @@ CREATE TABLE `odms_additional_config` (
   `oauth2Endpoint` varchar(255) DEFAULT NULL,
   `orionDatasetFilePath` varchar(255) DEFAULT NULL,
   PRIMARY KEY (`id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -1484,7 +1784,7 @@ CREATE TABLE `qrtz_blob_triggers` (
   `BLOB_DATA` blob,
   PRIMARY KEY (`SCHED_NAME`,`TRIGGER_NAME`,`TRIGGER_GROUP`),
   CONSTRAINT `qrtz_blob_triggers_ibfk_1` FOREIGN KEY (`SCHED_NAME`, `TRIGGER_NAME`, `TRIGGER_GROUP`) REFERENCES `qrtz_triggers` (`SCHED_NAME`, `TRIGGER_NAME`, `TRIGGER_GROUP`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -1508,7 +1808,7 @@ CREATE TABLE `qrtz_calendars` (
   `CALENDAR_NAME` varchar(200) NOT NULL,
   `CALENDAR` blob NOT NULL,
   PRIMARY KEY (`SCHED_NAME`,`CALENDAR_NAME`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -1535,7 +1835,7 @@ CREATE TABLE `qrtz_cron_triggers` (
   `TIME_ZONE_ID` varchar(80) DEFAULT NULL,
   PRIMARY KEY (`SCHED_NAME`,`TRIGGER_NAME`,`TRIGGER_GROUP`),
   CONSTRAINT `qrtz_cron_triggers_ibfk_1` FOREIGN KEY (`SCHED_NAME`, `TRIGGER_NAME`, `TRIGGER_GROUP`) REFERENCES `qrtz_triggers` (`SCHED_NAME`, `TRIGGER_NAME`, `TRIGGER_GROUP`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -1569,7 +1869,7 @@ CREATE TABLE `qrtz_fired_triggers` (
   `IS_NONCONCURRENT` varchar(1) DEFAULT NULL,
   `REQUESTS_RECOVERY` varchar(1) DEFAULT NULL,
   PRIMARY KEY (`SCHED_NAME`,`ENTRY_ID`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -1600,7 +1900,7 @@ CREATE TABLE `qrtz_job_details` (
   `REQUESTS_RECOVERY` varchar(1) NOT NULL,
   `JOB_DATA` blob,
   PRIMARY KEY (`SCHED_NAME`,`JOB_NAME`,`JOB_GROUP`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -1623,7 +1923,7 @@ CREATE TABLE `qrtz_locks` (
   `SCHED_NAME` varchar(120) NOT NULL,
   `LOCK_NAME` varchar(40) NOT NULL,
   PRIMARY KEY (`SCHED_NAME`,`LOCK_NAME`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -1646,7 +1946,7 @@ CREATE TABLE `qrtz_paused_trigger_grps` (
   `SCHED_NAME` varchar(120) NOT NULL,
   `TRIGGER_GROUP` varchar(200) NOT NULL,
   PRIMARY KEY (`SCHED_NAME`,`TRIGGER_GROUP`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -1671,7 +1971,7 @@ CREATE TABLE `qrtz_scheduler_state` (
   `LAST_CHECKIN_TIME` bigint(13) NOT NULL,
   `CHECKIN_INTERVAL` bigint(13) NOT NULL,
   PRIMARY KEY (`SCHED_NAME`,`INSTANCE_NAME`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -1699,7 +1999,7 @@ CREATE TABLE `qrtz_simple_triggers` (
   `TIMES_TRIGGERED` bigint(10) NOT NULL,
   PRIMARY KEY (`SCHED_NAME`,`TRIGGER_NAME`,`TRIGGER_GROUP`),
   CONSTRAINT `qrtz_simple_triggers_ibfk_1` FOREIGN KEY (`SCHED_NAME`, `TRIGGER_NAME`, `TRIGGER_GROUP`) REFERENCES `qrtz_triggers` (`SCHED_NAME`, `TRIGGER_NAME`, `TRIGGER_GROUP`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -1735,7 +2035,7 @@ CREATE TABLE `qrtz_simprop_triggers` (
   `BOOL_PROP_2` varchar(1) DEFAULT NULL,
   PRIMARY KEY (`SCHED_NAME`,`TRIGGER_NAME`,`TRIGGER_GROUP`),
   CONSTRAINT `qrtz_simprop_triggers_ibfk_1` FOREIGN KEY (`SCHED_NAME`, `TRIGGER_NAME`, `TRIGGER_GROUP`) REFERENCES `qrtz_triggers` (`SCHED_NAME`, `TRIGGER_NAME`, `TRIGGER_GROUP`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -1774,7 +2074,7 @@ CREATE TABLE `qrtz_triggers` (
   PRIMARY KEY (`SCHED_NAME`,`TRIGGER_NAME`,`TRIGGER_GROUP`),
   KEY `SCHED_NAME` (`SCHED_NAME`,`JOB_NAME`,`JOB_GROUP`),
   CONSTRAINT `qrtz_triggers_ibfk_1` FOREIGN KEY (`SCHED_NAME`, `JOB_NAME`, `JOB_GROUP`) REFERENCES `qrtz_job_details` (`SCHED_NAME`, `JOB_NAME`, `JOB_GROUP`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -1851,7 +2151,7 @@ CREATE TABLE `themes` (
   `es` text,
   `sv` text,
   PRIMARY KEY (`identifier`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --

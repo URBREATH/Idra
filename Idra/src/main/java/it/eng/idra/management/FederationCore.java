@@ -40,7 +40,9 @@ import it.eng.idra.beans.search.SearchResult;
 import it.eng.idra.cache.CachePersistenceManager;
 import it.eng.idra.cache.LodCacheManager;
 import it.eng.idra.cache.MetadataCacheManager;
+import it.eng.idra.dcat.dump.DcatApDeserializer;
 import it.eng.idra.dcat.dump.DcatApDumpManager;
+import it.eng.idra.dcat.dump.DcatApItDeserializer;
 import it.eng.idra.dcat.dump.DcatApSerializer;
 import it.eng.idra.scheduler.IdraScheduler;
 import it.eng.idra.scheduler.exception.SchedulerNotInitialisedException;
@@ -55,6 +57,8 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.stream.Collectors;
+import org.apache.commons.lang.StringUtils;
+import org.apache.jena.rdf.model.Model;
 import javax.net.ssl.SSLHandshakeException;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -743,7 +747,6 @@ public class FederationCore {
         // SynchManager.addODMSNodeSynchTimer(node, false);
 
         IdraScheduler.getSingletonInstance().startCataloguesSynchJob(node, false);
-
       }
 
       if (oldLevel.equals(OdmsCatalogueFederationLevel.LEVEL_2)
@@ -772,11 +775,45 @@ public class FederationCore {
         MetadataCacheManager.deleteAllDatasetsByOdmsCatalogue(node);
         MetadataCacheManager.loadCacheFromOdmsCatalogue(node, false);
       }
+      
+      // Add code to update the dump file if a new dumpString is provided for DCATDUMP catalogs
+      if (node.getNodeType().equals(OdmsCatalogueType.DCATDUMP)) {
+        if (StringUtils.isNotBlank(node.getDumpString())) {
+          Model m = null;
+          switch (node.getDcatProfile()) {
+            case DCATAP_IT:
+              m = new DcatApItDeserializer().dumpToModel(node.getDumpString(), node);
+              break;
+            default:
+              // If no profile was provided, instantiate a base DCATAP Deserializer
+              m = new DcatApDeserializer().dumpToModel(node.getDumpString(), node);
+              break;
+          }
+
+          // Use existing file path or create a new one if needed
+          String filePath = node.getDumpFilePath();
+          if (StringUtils.isBlank(filePath)) {
+            String odmsDumpFilePath = PropertyManager.getProperty(IdraProperty.ODMS_DUMP_FILE_PATH);
+            filePath = odmsDumpFilePath + "dumpFileString_" + node.getId();
+            node.setDumpFilePath(filePath);
+          } else {
+            // Extract directory and filename from the existing path
+            int lastSlashIndex = filePath.lastIndexOf('/');
+            String directory = (lastSlashIndex > 0) ? filePath.substring(0, lastSlashIndex + 1) : "";
+            String filename = (lastSlashIndex > 0) ? filePath.substring(lastSlashIndex + 1) : filePath;
+            
+            // Write model to file
+            DcatApSerializer.writeModelToFile(m, DcatApFormat.RDFXML, directory, filename);
+            
+            logger.info("Updated dump file at: " + filePath);
+          }
+        }
+      }
 
     } catch (SchedulerNotInitialisedException e) {
-      // TODO Auto-generated catch block
       e.printStackTrace();
     }
+    
     OdmsManager.updateOdmsCatalogue(node, true);
     OdmsManager.insertOdmsMessage(node.getId(), "Node successfully updated");
     logger.info("The ODMS Catalogue with name: " + node.getName() + " and ID: " + node.getId()
@@ -786,7 +823,6 @@ public class FederationCore {
     try {
       OdmsManager.updateOdmsCatalogueList();
     } catch (SQLException e) {
-      // TODO Auto-generated catch block
       e.printStackTrace();
     }
 
@@ -1005,8 +1041,78 @@ public class FederationCore {
    * @return true, if is dcat theme
    */
   public static boolean isDcatTheme(String value) {
+    // log dcatThemes
+    logger.info("Available DCAT themes: " + dcatThemes.toString());
+
+    String identifierFromLink = (value != null && (value.startsWith("http://") || value.startsWith("https://"))) ? value.substring(value.lastIndexOf("/") + 1) : null;
+  
     return dcatThemes.stream().anyMatch(
-        x -> x.getIdentifier().equalsIgnoreCase(value) || x.getEn().equalsIgnoreCase(value));
+        x -> x.getIdentifier().equalsIgnoreCase(value) || x.getIdentifier().equalsIgnoreCase(identifierFromLink)
+            || x.getEn().equalsIgnoreCase(value)
+            || fixEncoding(x.getIt()).equalsIgnoreCase(value) || fixEncoding(x.getDa()).equalsIgnoreCase(value)
+            || fixEncoding(x.getBg()).equalsIgnoreCase(value) || fixEncoding(x.getCs()).equalsIgnoreCase(value)
+            || fixEncoding(x.getDe()).equalsIgnoreCase(value) || fixEncoding(x.getEl()).equalsIgnoreCase(value)
+            || fixEncoding(x.getEs()).equalsIgnoreCase(value) || fixEncoding(x.getFr()).equalsIgnoreCase(value)
+            || fixEncoding(x.getHu()).equalsIgnoreCase(value) || fixEncoding(x.getLt()).equalsIgnoreCase(value)
+            || fixEncoding(x.getLv()).equalsIgnoreCase(value) || fixEncoding(x.getNl()).equalsIgnoreCase(value)
+            || fixEncoding(x.getPl()).equalsIgnoreCase(value) || fixEncoding(x.getPt()).equalsIgnoreCase(value)
+            || fixEncoding(x.getRo()).equalsIgnoreCase(value) || fixEncoding(x.getHu()).equalsIgnoreCase(value)
+            || fixEncoding(x.getSk()).equalsIgnoreCase(value) || fixEncoding(x.getSl()).equalsIgnoreCase(value)
+            || fixEncoding(x.getSv()).equalsIgnoreCase(value) || fixEncoding(x.getEt()).equalsIgnoreCase(value)
+            || fixEncoding(x.getFi()).equalsIgnoreCase(value) || fixEncoding(x.getGa()).equalsIgnoreCase(value)
+            || fixEncoding(x.getHr()).equalsIgnoreCase(value) || fixEncoding(x.getMt()).equalsIgnoreCase(value)
+            || fixEncoding(x.getNo()).equalsIgnoreCase(value));
+  }
+
+  private static String fixEncoding(String value) {
+    try {
+      return new String(value.getBytes("ISO-8859-1"), "UTF-8");
+    } catch (Exception e) {
+      return value;
+    }
+  }
+
+  /**
+   * Gets the English DCAT theme for any language input.
+   *
+   * @param value the theme value (any language)
+   * @return the English theme if found, otherwise null
+   */
+  public static String getEnglishDcatTheme(String value) {
+    String identifierFromLink = (value != null && (value.startsWith("http://") || value.startsWith("https://"))) ? value.substring(value.lastIndexOf("/") + 1) : null;
+    // First, try to match by identifier or English
+    for (DcatThemes x : dcatThemes) {
+      if (x.getIdentifier().equalsIgnoreCase(value) || x.getIdentifier().equalsIgnoreCase(identifierFromLink)
+          || x.getEn().equalsIgnoreCase(value)) {
+        return x.getEn();
+      }
+    }
+    // If not found, check all other languages
+    for (DcatThemes x : dcatThemes) {
+      if (fixEncoding(x.getIt()).equalsIgnoreCase(value) || fixEncoding(x.getDa()).equalsIgnoreCase(value)
+          || fixEncoding(x.getBg()).equalsIgnoreCase(value) || fixEncoding(x.getCs()).equalsIgnoreCase(value)
+          || fixEncoding(x.getDe()).equalsIgnoreCase(value) || fixEncoding(x.getEl()).equalsIgnoreCase(value)
+          || fixEncoding(x.getEs()).equalsIgnoreCase(value) || fixEncoding(x.getFr()).equalsIgnoreCase(value)
+          || fixEncoding(x.getHu()).equalsIgnoreCase(value) || fixEncoding(x.getLt()).equalsIgnoreCase(value)
+          || fixEncoding(x.getLv()).equalsIgnoreCase(value) || fixEncoding(x.getNl()).equalsIgnoreCase(value)
+          || fixEncoding(x.getPl()).equalsIgnoreCase(value) || fixEncoding(x.getPt()).equalsIgnoreCase(value)
+          || fixEncoding(x.getRo()).equalsIgnoreCase(value) || fixEncoding(x.getSk()).equalsIgnoreCase(value)
+          || fixEncoding(x.getSl()).equalsIgnoreCase(value) || fixEncoding(x.getSv()).equalsIgnoreCase(value)
+          || fixEncoding(x.getEt()).equalsIgnoreCase(value) || fixEncoding(x.getFi()).equalsIgnoreCase(value)
+          || fixEncoding(x.getGa()).equalsIgnoreCase(value) || fixEncoding(x.getHr()).equalsIgnoreCase(value)
+          || fixEncoding(x.getMt()).equalsIgnoreCase(value) || fixEncoding(x.getNo()).equalsIgnoreCase(value)) {
+
+        // Found in another language, use identifier to get English
+        String identifier = x.getIdentifier();
+        for (DcatThemes theme : dcatThemes) {
+          if (theme.getIdentifier().equalsIgnoreCase(identifier)) {
+            return theme.getEn();
+          }
+        }
+      }
+    }
+    // Not found
+    return null;
   }
 
   /**

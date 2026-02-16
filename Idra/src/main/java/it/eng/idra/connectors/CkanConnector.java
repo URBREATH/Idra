@@ -1,6 +1,6 @@
 /*******************************************************************************
  * Idra - Open Data Federation Platform
- * Copyright (C) 2021 Engineering Ingegneria Informatica S.p.A.
+ * Copyright (C) 2025 Engineering Ingegneria Informatica S.p.A.
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as published by
  * the Free Software Foundation, either version 3 of the License, or
@@ -15,17 +15,19 @@
 
 package it.eng.idra.connectors;
 
-import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
-import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import it.eng.idra.beans.dcat.DcatDataService;
 import it.eng.idra.beans.dcat.DcatDataset;
+import it.eng.idra.beans.dcat.DcatDatasetSeries;
+import it.eng.idra.beans.dcat.DcatDetails;
 import it.eng.idra.beans.dcat.DcatDistribution;
 import it.eng.idra.beans.dcat.DctLicenseDocument;
 import it.eng.idra.beans.dcat.DctLocation;
 import it.eng.idra.beans.dcat.DctPeriodOfTime;
 import it.eng.idra.beans.dcat.DctStandard;
 import it.eng.idra.beans.dcat.FoafAgent;
+import it.eng.idra.beans.dcat.Relationship;
 import it.eng.idra.beans.dcat.SkosConcept;
 import it.eng.idra.beans.dcat.SkosConceptSubject;
 import it.eng.idra.beans.dcat.SkosConceptTheme;
@@ -39,6 +41,7 @@ import it.eng.idra.beans.odms.OdmsCatalogueNotFoundException;
 import it.eng.idra.beans.odms.OdmsCatalogueOfflineException;
 import it.eng.idra.beans.odms.OdmsSynchronizationResult;
 import it.eng.idra.cache.MetadataCacheManager;
+import it.eng.idra.management.FederationCore;
 import it.eng.idra.management.StatisticsManager;
 import it.eng.idra.utils.CommonUtil;
 import it.eng.idra.utils.GsonUtil;
@@ -49,6 +52,7 @@ import java.net.MalformedURLException;
 import java.text.ParseException;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -58,13 +62,17 @@ import org.apache.jena.vocabulary.DCTerms;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.apache.solr.client.solrj.SolrServerException;
+import org.ckan.AccessService;
 import org.ckan.CKANException;
 import org.ckan.Client;
 import org.ckan.Connection;
 import org.ckan.Dataset;
 import org.ckan.Extra;
+import org.ckan.QualifiedRelation;
 import org.ckan.Resource;
+import org.ckan.SpatialCoverage;
 import org.ckan.Tag;
+import org.ckan.TemporalCoverage;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
@@ -131,7 +139,11 @@ public class CkanConnector implements IodmsConnector {
       throws CKANException, MalformedURLException, OdmsCatalogueOfflineException,
       OdmsCatalogueNotFoundException, OdmsCatalogueForbiddenException {
 
-    Client c = new Client(new Connection(node.getHost()), node.getApiKey());
+    String host = node.getHost();
+    if (!host.startsWith("http://") && !host.startsWith("https://")) {
+      host = "https://" + host;
+    }
+    Client c = new Client(new Connection(host), node.getApiKey());
 
     Dataset.SearchResults result;
     try {
@@ -140,7 +152,9 @@ public class CkanConnector implements IodmsConnector {
 
       c = null;
       if (result.count == 0) {
-        throw new OdmsCatalogueOfflineException(" The ODMS node is currently unreachable");
+        result.count = 1;
+        // throw new OdmsCatalogueOfflineException(" The ODMS node is currently
+        // unreachable");
       }
 
       return result.count;
@@ -192,7 +206,12 @@ public class CkanConnector implements IodmsConnector {
     }
 
     logger.info("-- CKAN Connector Request sent -- " + "ROWS: " + rows);
-    Client c = new Client(new Connection(node.getHost()), node.getApiKey());
+
+    String host = node.getHost();
+    if (!host.startsWith("http://") && !host.startsWith("https://")) {
+      host = "https://" + host;
+    }
+    Client c = new Client(new Connection(host), node.getApiKey());
     // si pu� fare qui il trick
     ArrayList<DcatDataset> dcatResults = new ArrayList<DcatDataset>();
     logger.info(dcatResults.size());
@@ -313,15 +332,33 @@ public class CkanConnector implements IodmsConnector {
     List<String> versionNotes = new ArrayList<String>();
     List<String> relatedResource = new ArrayList<String>();
 
+    // new
+    String bbox = null;
+    String centroid = null;
+    String geom = null;
+    String beginning = null;
+    String end = null;
+    List<String> applicableLegislation = new ArrayList<String>();
+    List<DctLocation> geographicalCoverage = new ArrayList<DctLocation>();
+    List<DcatDetails> descriptions = new ArrayList<DcatDetails>();
+    List<DcatDetails> titles = new ArrayList<DcatDetails>();
+    List<DctPeriodOfTime> temporalCoverageList = new ArrayList<DctPeriodOfTime>();
+    List<DcatDatasetSeries> inSeries = new ArrayList<DcatDatasetSeries>();
+    List<Relationship> qualifiedRelation = new ArrayList<Relationship>();
+    String temporalResolution = null;
+    List<String> wasGeneratedBy = new ArrayList<String>();
+    List<String> HVDCategory = new ArrayList<String>();
+    // List<String> names = new ArrayList<String>();
+    DcatDatasetSeries datasetSeries = null;
+
     List<DcatDistribution> distributionList = new ArrayList<DcatDistribution>();
-    
+
     HashMap<String, String> dcatThemes = dcatThemesMap();
 
     otherIdentifier.add(d.getName());
 
     try {
       for (Extra e : d.getExtras()) {
-
         switch (e.getKey().toLowerCase()) {
           case "alternate_identifier":
             if (checkIfJsonArray(e.getValue())) {
@@ -329,13 +366,7 @@ public class CkanConnector implements IodmsConnector {
               List<String> ids = new ArrayList<String>();
               JSONArray array = new JSONArray(e.getValue());
               for (int i = 0; i < array.length(); i++) {
-                String identif = "";
-                if (array.get(i) instanceof JSONObject) {
-                  identif = array.getJSONObject(i).getString("identifier");
-                } else {
-                  identif = array.getString(i);
-                    logger.warn("Element at index " + i + " is not a JSONObject: " + array.get(i));
-                }
+                String identif = array.getJSONObject(i).getString("identifier");
                 if (!identif.equals("N/A") && !ids.contains(identif)) {
                   ids.add(identif);
                 }
@@ -348,28 +379,31 @@ public class CkanConnector implements IodmsConnector {
           case "theme":
             if (checkIfJsonArray(e.getValue())) {
               logger.info("THEME: " + e.getValue() + " IS A JSON ARRAY");
-              List<String> themes = new ArrayList<String>();
+              List<String> themes = new ArrayList<>();
               JSONArray array = new JSONArray(e.getValue());
+
               for (int i = 0; i < array.length(); i++) {
-                String themeCode = "";
-                if (array.get(i) instanceof JSONObject) {
-                    themeCode = array.getJSONObject(i).getString("theme");
+                Object element = array.get(i);
+
+                if (element instanceof JSONObject) {
+                  JSONObject obj = (JSONObject) element;
+                  if (obj.has("theme")) {
+                    String themeCode = obj.getString("theme");
+                    themes.add(dcatThemes.getOrDefault(themeCode, themeCode));
+                  }
+                } else if (element instanceof String) {
+                  String themeCode = (String) element;
+                  themes.add(dcatThemes.getOrDefault(themeCode, themeCode));
                 } else {
-                  themeCode = array.getString(i);
-                    logger.warn("Element at index " + i + " is not a JSONObject: " + array.get(i));
-                }
-                if (dcatThemes.containsKey(themeCode)) {
-                  themes.add(dcatThemes.get(themeCode));
-                } else {
-                  themes.add(themeCode);
+                  themes.add(element.toString());
                 }
               }
-              themeList
-                  .addAll(extractConceptList(DCAT.theme.getURI(),
-                      themes, SkosConceptTheme.class));
+
+              themeList.addAll(
+                  extractConceptList(DCAT.theme.getURI(), themes, SkosConceptTheme.class));
             } else {
-              themeList
-                  .addAll(extractConceptList(DCAT.theme.getURI(),
+              themeList.addAll(
+                  extractConceptList(DCAT.theme.getURI(),
                       extractValueList(e.getValue()), SkosConceptTheme.class));
             }
             break;
@@ -412,21 +446,24 @@ public class CkanConnector implements IodmsConnector {
           case "Copertura Geografica URI":
           case "geometry":
           case "spatial_geometry":
+            // case "geographicalCoverage":
             String input = e.getValue();
-            if (checkIfJsonObject(input)) {
-              geometry = input;
-            } else if (input.startsWith("http://")) {
+            if (input.startsWith("http://") || input.startsWith("https://"))
               geographicalIdentifier = input.trim();
+            else if (checkIfJsonObject(input)) {
+              geometry = input;
             } else {
               geographicalName = input.trim();
             }
             break;
-          case "temporal_start":
-            startDate = e.getValue();
-            break;
-          case "temporal_end":
-            endDate = e.getValue();
-            break;
+          /*
+           * case "temporal_start":
+           * startDate = e.getValue();
+           * break;
+           * case "temporal_end":
+           * endDate = e.getValue();
+           * break;
+           */
           case "dcat_type":
             type = e.getValue();
             break;
@@ -504,6 +541,90 @@ public class CkanConnector implements IodmsConnector {
           case "contact_email":
             vcardHasEmail = e.getValue();
             break;
+          // case "bbox":
+          // bbox = e.getValue();
+          // break;
+          // case "centroid":
+          // centroid = e.getValue();
+          // break;
+          case "has_beginning":
+          case "beginning":
+          case "temporal_beginning":
+          case "temporal_has_beginning":
+            beginning = e.getValue();
+            break;
+          case "has_end":
+          case "end":
+          case "temporal_has_end":
+            end = e.getValue();
+            break;
+          /*
+           * case "in_series":
+           * case "inSeries":
+           * if (checkIfJsonArray(e.getValue())) {
+           * JSONArray array = new JSONArray(e.getValue());
+           * for (int i = 0; i < array.length(); i++) {
+           * JSONObject seriesObj = array.getJSONObject(i);
+           * 
+           * // DcatDetails dcatDetails = new DcatDetails();
+           * // dcatDetails.setTitle(title);
+           * // dcatDetails.setDescription(description);
+           * // Extracting properties from JSON
+           * applicableLegislation.addAll(extractValueList(seriesObj.optString(
+           * "applicableLegislation")));// .addAll(extractValueList(e.getValue()));
+           * // descriptions.add(dcatDetails); //
+           * // extractValueList(seriesObj.optString("description", "[]"));
+           * frequency = seriesObj.optString("frequency");
+           * // geographicalCoverage.add(spatialCoverage); //
+           * // extractValueList(seriesObj.optString("geographicalCoverage"));
+           * updateDate = seriesObj.optString("modificationDate");
+           * // publisher = new FoafAgent(DCTerms.publisher.getURI(), publisherUri,
+           * // publisherName != null
+           * // ? Collections.singletonList(publisherName)
+           * // : Collections.emptyList(),
+           * // publisherMbox, publisherHomepage, publisherType, publisherIdentifier,
+           * // nodeId);
+           * releaseDate = seriesObj.optString("releaseDate");
+           * // temporalCoverage = new DctPeriodOfTime(DCTerms.temporal.getURI(),
+           * startDate,
+           * // endDate,
+           * // nodeId, beginning, end, identifier);
+           * // temporalCoverageList.add(temporalCoverage);
+           * // titles.add(dcatDetails); // extractValueList(seriesObj.optString("title",
+           * // "[]"));
+           * 
+           * // Create part of the DcatDatasetSeries object DcatDatasetSeries series
+           * datasetSeries = new DcatDatasetSeries(
+           * applicableLegislation,
+           * null, // contactPointList,
+           * null, // descriptions,
+           * frequency,
+           * null, // geographicalCoverage,
+           * updateDate,
+           * null, // publisher,
+           * releaseDate,
+           * null, // temporalCoverageList,
+           * null, // titles,
+           * String.valueOf(node.getId()),
+           * identifier);
+           * 
+           * // Add to the list
+           * // inSeries.add(series);
+           * }
+           * }
+           * break;
+           * case "qualified_relation":
+           * case "qualifiedRelation":
+           * case "relationship":
+           * JsonElement jelement = JsonParser.parseString(e.getValue());
+           * JsonObject jobject = jelement.getAsJsonObject();
+           * Relationship relationship = new
+           * Relationship(jobject.get("had_role").getAsString(),
+           * jobject.get("relation").getAsString());
+           * qualifiedRelation.add(relationship); //
+           * addAll(extractValueList(e.getValue()));
+           * break;
+           */
           default:
             break;
         }
@@ -525,6 +646,16 @@ public class CkanConnector implements IodmsConnector {
        */
       identifier = d.getId();
 
+      /*
+       * DcatDetails dcatDetails = new DcatDetails();
+       * // dcatDetails.setNodeId(String.valueOf(node.getId()));// for test
+       * // catDetails.setDatasetId(id);// for test
+       * dcatDetails.setTitle(title);
+       * dcatDetails.setDescription(description);
+       * descriptions.add(dcatDetails);
+       * titles.add(dcatDetails);
+       */
+
       // Convert date fields into ISO 8601 format with UTC time zone
       if (StringUtils.isNotBlank(d.getMetadata_created())) {
         releaseDate = CommonUtil.fixBadUtcDate(d.getMetadata_created());
@@ -537,16 +668,57 @@ public class CkanConnector implements IodmsConnector {
         version = d.getVersion();
       }
 
-      if (StringUtils.isNotBlank(geographicalIdentifier) || StringUtils.isNotBlank(geographicalName)
-          || StringUtils.isNotBlank(geometry)) {
-        spatialCoverage = new DctLocation(DCTerms.spatial.getURI(), geographicalIdentifier,
-            geographicalName, geometry, nodeId);
+      List<SpatialCoverage> spatialCoverages = d.getSpatial_coverage();
+      if (spatialCoverages != null && !spatialCoverages.isEmpty()) {
+        for (SpatialCoverage s : spatialCoverages) {
+          bbox = s.getBbox();
+          centroid = s.getCentroid();
+          geom = s.getGeom();
+          // String text = s.getText();
+          // String uri = s.getUri();
+        }
       }
 
-      if (StringUtils.isNotBlank(startDate) && StringUtils.isNotBlank(endDate)) {
-        temporalCoverage = new DctPeriodOfTime(DCTerms.temporal.getURI(), startDate, endDate,
-            nodeId);
+      if (StringUtils.isNotBlank(geographicalIdentifier) || StringUtils.isNotBlank(geographicalName)
+          || StringUtils.isNotBlank(geom) || StringUtils.isNotBlank(bbox) || StringUtils.isNotBlank(centroid)) {
+        spatialCoverage = new DctLocation(DCTerms.spatial.getURI(), geographicalIdentifier,
+            geographicalName, geom, nodeId, bbox, centroid);
+        geographicalCoverage.add(spatialCoverage);
       }
+
+      List<TemporalCoverage> temporalCoverages = d.getTemporal_coverage();
+      if (temporalCoverages != null && !temporalCoverages.isEmpty()) {
+        for (TemporalCoverage t : temporalCoverages) {
+          startDate = t.getStart();
+          endDate = t.getEnd();
+          if (StringUtils.isNotBlank(startDate) || StringUtils.isNotBlank(endDate)
+              || StringUtils.isNotBlank(beginning) || StringUtils.isNotBlank(end)) {
+            temporalCoverage = new DctPeriodOfTime(DCTerms.temporal.getURI(), startDate, endDate,
+                nodeId, beginning, end);
+            temporalCoverageList.add(temporalCoverage);
+          }
+        }
+      }
+
+      /*
+       * if (StringUtils.isNotBlank(geographicalIdentifier) ||
+       * StringUtils.isNotBlank(geographicalName)
+       * || StringUtils.isNotBlank(geometry) || StringUtils.isNotBlank(bbox) ||
+       * StringUtils.isNotBlank(centroid)) {
+       * spatialCoverage = new DctLocation(DCTerms.spatial.getURI(),
+       * geographicalIdentifier,
+       * geographicalName, geometry, nodeId, bbox, centroid);
+       * geographicalCoverage.add(spatialCoverage);
+       * }
+       * 
+       * if (StringUtils.isNotBlank(startDate) && StringUtils.isNotBlank(endDate)) {
+       * temporalCoverage = new DctPeriodOfTime(DCTerms.temporal.getURI(), startDate,
+       * endDate,
+       * nodeId, beginning, end);
+       * temporalCoverageList.add(temporalCoverage);
+       * }
+       * 
+       */
 
       // Contact Point
       if (StringUtils.isBlank(vcardFn)) {
@@ -569,19 +741,25 @@ public class CkanConnector implements IodmsConnector {
       // Publisher
       if (publisherUri != null || publisherName != null || publisherMbox != null
           || publisherHomepage != null || publisherType != null || publisherIdentifier != null) {
-        publisher = new FoafAgent(DCTerms.publisher.getURI(), publisherUri, publisherName,
+        publisher = new FoafAgent(DCTerms.publisher.getURI(), publisherUri, publisherName != null
+            ? Collections.singletonList(publisherName)
+            : Collections.emptyList(),
             publisherMbox, publisherHomepage, publisherType, publisherIdentifier, nodeId);
       }
       // Rights Holder
       if (holderUri != null || holderName != null || holderMbox != null || holderHomepage != null
           || holderType != null || holderIdentifier != null) {
-        rightsHolder = new FoafAgent(DCTerms.rightsHolder.getURI(), holderUri, holderName,
+        rightsHolder = new FoafAgent(DCTerms.rightsHolder.getURI(), holderUri, holderName != null
+            ? Collections.singletonList(holderName)
+            : Collections.emptyList(),
             holderMbox, holderHomepage, holderType, holderIdentifier, nodeId);
       }
       // Creator
       if (creatorUri != null || creatorName != null || creatorMbox != null
           || creatorHomepage != null || creatorType != null || creatorIdentifier != null) {
-        creator = new FoafAgent(DCTerms.creator.getURI(), creatorUri, creatorName, creatorMbox,
+        creator = new FoafAgent(DCTerms.creator.getURI(), creatorUri, creatorName != null
+            ? Collections.singletonList(creatorName)
+            : Collections.emptyList(), creatorMbox,
             creatorHomepage, creatorType, creatorIdentifier, nodeId);
       }
       // License
@@ -607,6 +785,36 @@ public class CkanConnector implements IodmsConnector {
         landingPage = nodeHost + (nodeHost.endsWith("/") ? "" : "/") + "dataset/" + identifier;
       }
 
+      /*
+       * logger.info(
+       * "applicableLegislation size: " +
+       * (d.getApplicable_legislation() != null &&
+       * !d.getApplicable_legislation().isEmpty()
+       * ? d.getApplicable_legislation().size()
+       * : null));
+       */
+      applicableLegislation = d.getApplicable_legislation();
+
+      // logger.info("qualifiedRelation size: " + d.getQualified_relation().size());
+
+      if (d.getQualified_relation() != null) {
+        for (QualifiedRelation q : d.getQualified_relation()) {
+          String role = q.getRole(); // maps to had_role
+          String relation = q.getRelation(); // maps to relation
+          if ((role != null && !role.isEmpty()) || (relation != null &&
+              !relation.isEmpty())) {
+            qualifiedRelation.add(new Relationship(role, relation, nodeId));
+          }
+        }
+      }
+
+      // logger.info("temporalResolution: " + d.getTemporal_resolution());
+      temporalResolution = d.getTemporal_resolution();
+      // logger.info("wasGeneratedBy size: " + d.getWas_generated_by().size());
+      wasGeneratedBy = d.getWas_generated_by();
+      // logger.info("HVDCategory: " + d.getHvd_category());
+      HVDCategory.add(d.getHvd_category());
+
       // Distributions
       List<Resource> resourceList = d.getResources();
       if (resourceList != null) {
@@ -614,13 +822,83 @@ public class CkanConnector implements IodmsConnector {
           distributionList.add(resourceToDcat(r, landingPage, license));
         }
       }
+
+      if (d.getTheme() != null && !d.getTheme().isEmpty()) {
+        List<String> themes = new ArrayList<>();
+
+        for (String rawTheme : d.getTheme()) {
+          String value = rawTheme.trim();
+
+          try {
+            if (checkIfJsonArray(value)) {
+              // Case: JSON array (could be array of objects OR strings)
+              JSONArray array = new JSONArray(value);
+              for (int i = 0; i < array.length(); i++) {
+                Object element = array.get(i);
+
+                if (element instanceof JSONObject) {
+                  // [{"theme": "ECON"}]
+                  JSONObject obj = (JSONObject) element;
+                  if (obj.has("theme")) {
+                    String themeCode = obj.getString("theme");
+                    themes.add(dcatThemes.getOrDefault(themeCode, themeCode));
+                  }
+                } else if (element instanceof String) {
+                  // ["http://publications.europa.eu/resource/authority/data-theme/ENVI"]
+                  String themeCode = (String) element;
+                  themes.add(dcatThemes.getOrDefault(themeCode, themeCode));
+                } else {
+                  // Fallback: unknown type inside array
+                  themes.add(element.toString());
+                }
+              }
+            } else if (checkIfJsonObject(value)) {
+              // Case: single JSON object {"theme": "TRAN"}
+              JSONObject obj = new JSONObject(value);
+              if (obj.has("theme")) {
+                String themeCode = obj.getString("theme");
+                themes.add(dcatThemes.getOrDefault(themeCode, themeCode));
+              }
+            } else {
+              // Case: plain string value
+              themes.addAll(extractValueList(value));
+            }
+          } catch (Exception e) {
+            logger.warn("Failed to parse theme value: {}", value, e);
+            themes.add(value); // fallback
+          }
+        }
+
+        // finally add to themeList
+        themeList.addAll(
+            extractConceptList(DCAT.theme.getURI(), themes, SkosConceptTheme.class));
+      }
+
+      /*
+       * if (datasetSeries != null) {
+       * datasetSeries.setContactPoint(contactPointList);
+       * datasetSeries.setDescription(descriptions);
+       * datasetSeries.setTitle(titles);
+       * datasetSeries.setGeographicalCoverage(geographicalCoverage);
+       * datasetSeries.setTemporalCoverage(temporalCoverageList);
+       * datasetSeries.setPublisher(publisher);
+       * // check, below part because in setter it is dcatproperty
+       * //datasetSeries.setApplicableLegislation(null);
+       * //datasetSeries.setFrequency(null);
+       * //datasetSeries.setModificationDate(null);
+       * //datasetSeries.setReleaseDate(null);
+       * // Add to the list
+       * inSeries.add(datasetSeries);
+       * }
+       */
     }
 
     mapped = new DcatDataset(nodeId, identifier, title, description, distributionList, themeList,
         publisher, contactPointList, keywords, accessRights, conformsTo, documentation, frequency,
         hasVersion, isVersionOf, landingPage, language, provenance, releaseDate, updateDate,
-        otherIdentifier, sample, source, spatialCoverage, temporalCoverage, type, version,
-        versionNotes, rightsHolder, creator, subjectList, relatedResource);
+        otherIdentifier, sample, source, geographicalCoverage, temporalCoverageList, type, version,
+        versionNotes, rightsHolder, creator, subjectList, relatedResource, applicableLegislation,
+        inSeries, qualifiedRelation, temporalResolution, wasGeneratedBy, HVDCategory);
 
     distributionList = null;
     publisher = null;
@@ -632,7 +910,7 @@ public class CkanConnector implements IodmsConnector {
   /**
    * Extract concept list.
    *
-   * @param             <T> the generic type
+   * @param <T>         the generic type
    * @param propertyUri the property uri
    * @param concepts    the concepts
    * @param type        the type
@@ -649,7 +927,8 @@ public class CkanConnector implements IodmsConnector {
     for (String label : concepts) {
       try {
         result.add(type.getDeclaredConstructor(SkosConcept.class).newInstance(new SkosConcept(
-            propertyUri, "", Arrays.asList(new SkosPrefLabel("", label, nodeId)), nodeId)));
+            propertyUri, "", Arrays.asList(new SkosPrefLabel("", FederationCore.getEnglishDcatTheme(label), nodeId)),
+            nodeId)));
       } catch (InstantiationException | IllegalAccessException | IllegalArgumentException
           | InvocationTargetException | NoSuchMethodException | SecurityException e) {
         // TODO Auto-generated catch block
@@ -758,20 +1037,30 @@ public class CkanConnector implements IodmsConnector {
     String format = null;
     String downloadUrl = null;
 
+    // New Properties
+    List<DcatDataService> accessService = new ArrayList<DcatDataService>();
+    List<String> applicableLegislation = new ArrayList<String>();
+    String availability = null;
+    String compressionFormat = null;
+    String hasPolicy = null;
+    String packagingFormat = null;
+    String spatialResolution = null;
+    String temporalResolution = null;
+
     accessUrl = downloadUrl = StringUtils.isNotBlank(r.getUrl()) ? r.getUrl() : datasetLandingPage;
     description = r.getDescription();
     format = r.getFormat();
     String byteSize = null;
     byteSize = String.valueOf(r.getSize());
     SpdxChecksum checksum = null;
-    
+
     String checksumValue = r.getHash();
     if (checkIfJsonObject(checksumValue)) {
       logger.info("CHECKSUM " + checksumValue + " IS A JSON OBJ");
       JSONObject obj = new JSONObject(checksumValue);
       checksumValue = obj.getString("content");
     }
-    
+
     checksum = new SpdxChecksum("http://spdx.org/rdf/terms#checksum", "checksumAlgorithm_sha1",
         checksumValue, nodeId);
     // documentation = r.get ?
@@ -791,9 +1080,60 @@ public class CkanConnector implements IodmsConnector {
     String title = null;
     title = r.getName();
 
+    // logger.info("accessService size: " + (r.getAccess_services() != null ?
+    // r.getAccess_services().size() : null));
+    if (r.getAccess_services() != null) {
+      for (AccessService src : r.getAccess_services()) {
+        String accessRights = src.getAccess_rights();
+        String endpointDescription = src.getEndpoint_description();
+        List<String> endpointUrls = src.getEndpoint_url();
+        List<String> servesDatasets = src.getServes_dataset();
+        String titleservice = src.getTitle();
+        // String uri = src.getUri();
+        DcatDataService service = new DcatDataService(
+            null, // r.getApplicable_legislation(), // applicableLegislation
+            null, // contactPoint
+            null, // r.getDocumentation(), // documentation
+            endpointDescription != null ? List.of(endpointDescription) : null,
+            endpointUrls,
+            null, // HVDCategory
+            null, // r.getLicense(), // licence
+            accessRights != null ? List.of(accessRights) : null, // rights
+            servesDatasets, // servesDataset (if needed, map servesDatasets to DcatDataset list)
+            titleservice,
+            nodeId);
+
+        accessService.add(service);
+      }
+    }
+
+    /*
+     * logger.info(
+     * "applicableLegislation size: " +
+     * (r.getApplicable_legislation() != null &&
+     * !r.getApplicable_legislation().isEmpty()
+     * ? r.getApplicable_legislation().size()
+     * : null));
+     */
+    applicableLegislation = r.getApplicable_legislation();
+    // logger.info("availability: " + r.getAvailability());
+    availability = r.getAvailability();
+    // logger.info("compressionFormat: " + r.getCompress_format());
+    compressionFormat = r.getCompress_format();
+    // logger.info("hasPolicy: " + r.getHas_policy());
+    hasPolicy = r.getHas_policy();
+    // logger.info("packagingFormat: " + r.getPackage_format());
+    packagingFormat = r.getPackage_format();
+    // logger.info("spatialResolution: " + r.getSpatial_resolution_in_meters());
+    spatialResolution = r.getSpatial_resolution_in_meters();
+    // logger.info("temporalResolution: " + r.getTemporal_resolution());
+    temporalResolution = r.getTemporal_resolution();
+
     return new DcatDistribution(nodeId, accessUrl, description, format, datasetLicense, byteSize,
         checksum, new ArrayList<String>(), downloadUrl, new ArrayList<String>(),
-        new ArrayList<DctStandard>(), mediaType, releaseDate, updateDate, null, null, title);
+        new ArrayList<DctStandard>(), mediaType, releaseDate, updateDate, null, null, title, accessService,
+        applicableLegislation, availability, compressionFormat, hasPolicy, packagingFormat,
+        spatialResolution, temporalResolution);
   }
 
   /*
@@ -806,7 +1146,11 @@ public class CkanConnector implements IodmsConnector {
       throws CKANException, MalformedURLException, OdmsCatalogueOfflineException,
       OdmsCatalogueNotFoundException, OdmsCatalogueForbiddenException {
 
-    Client c = new Client(new Connection(node.getHost()), node.getApiKey());
+    String host = node.getHost();
+    if (!host.startsWith("http://") && !host.startsWith("https://")) {
+      host = "https://" + host;
+    }
+    Client c = new Client(new Connection(host), node.getApiKey());
     Dataset dataset;
     try {
       dataset = c.getDataset(datasetId);
@@ -847,7 +1191,12 @@ public class CkanConnector implements IodmsConnector {
     ArrayList<DcatDataset> dcatResults = new ArrayList<DcatDataset>();
 
     logger.info("-- CKAN Connector Request sent -- First synchronization ");
-    Client c = new Client(new Connection(node.getHost()), node.getApiKey());
+
+    String host = node.getHost();
+    if (!host.startsWith("http://") && !host.startsWith("https://")) {
+      host = "https://" + host;
+    }
+    Client c = new Client(new Connection(host), node.getApiKey());
 
     logger.info("\n-----------------------\n");
     logger.info("NODE - Dataset count: " + node.getDatasetCount());
@@ -861,7 +1210,6 @@ public class CkanConnector implements IodmsConnector {
     do {
 
       try {
-
         result = c.findDatasets(
             "metadata_modified:[* TO " + CommonUtil.formatDate(node.getRegisterDate()) + "]",
             Integer.toString(node.getDatasetStart()), "10000000", "metadata_modified asc");
@@ -920,7 +1268,11 @@ public class CkanConnector implements IodmsConnector {
     // The old datasets list is not used in CKAN Connector, The list of
     // Datasets IDs is used instead
 
-    Client c = new Client(new Connection(node.getHost()), node.getApiKey());
+    String host = node.getHost();
+    if (!host.startsWith("http://") && !host.startsWith("https://")) {
+      host = "https://" + host;
+    }
+    Client c = new Client(new Connection(host), node.getApiKey());
 
     OdmsSynchronizationResult syncrhoResult = new OdmsSynchronizationResult();
 
@@ -1098,21 +1450,25 @@ public class CkanConnector implements IodmsConnector {
   // throws JSONException, ParseException, CKANException,
   // MalformedURLException, ODMSCatalogueOfflineException,
   // ODMSCatalogueNotFoundException, ODMSCatalogueForbiddenException {
-  //
+
   // // The old datasets list is not used in CKAN Connector, due to the
   // // presence of appropriate
   // // API directly reporting the recently changed datasets (TEST CON
   // // PACKAGE SEARCH
   // // e differenza tra le liste di ID, in ogni caso la lista dei
   // // DCATDataset qui non serve)
-  //
-  // Client c = new Client(new Connection(node.getHost()), node.getAPIKey());
+
+  // String host = node.getHost();
+  // if (!host.startsWith("http://") && !host.startsWith("https://")) {
+  // host = "https://" + host;
+  // }
+  // Client c = new Client(new Connection(host), node.getAPIKey());
   // // HashMap<String, String> res;
   // // res = c.getChangedDatasetsID(startingDate);
-  //
+
   // HashMap<DCATDataset, String> changedDatasets = new HashMap<DCATDataset,
   // String>();
-  //
+
   // /*
   // * OLD APPROACH WITH RECENTLY CHANGED PACKAGE ACTIVITY LIST
   // *
@@ -1129,7 +1485,7 @@ public class CkanConnector implements IodmsConnector {
   // *
   // * }
   // */
-  //
+
   // /*
   // * FOR DELETED DATASETS, RETRIEVES THE CURRENT ID LIST ON THE NODE AND
   // * COMPARES IT WITH THE LOCAL ONE
@@ -1146,19 +1502,19 @@ public class CkanConnector implements IodmsConnector {
   // List<String> oldDatasetsID = null;
   // String[] newDatasetsID = null;
   // try {
-  //
+
   // oldDatasetsID =
   // MetadataCacheManager.getAllDatasetsIDByODMSNode(node.getId(), true);
-  //// System.out.println("old size: "+oldDatasetsID.size());
-  //// for(String a : oldDatasetsID){
-  //// System.out.println(a);
-  //// }
-  //
+  // // System.out.println("old size: "+oldDatasetsID.size());
+  // // for(String a : oldDatasetsID){
+  // // System.out.println(a);
+  // // }
+
   // } catch (DatasetNotFoundException | IOException | SolrServerException e)
   // {
   // logger.info(e.getMessage());
   // }
-  //
+
   // try {
   // newDatasetsID = c.getAllDatasetsID();
   // } catch (SocketTimeoutException /* | ODMSCatalogueOfflineException */ |
@@ -1167,22 +1523,22 @@ public class CkanConnector implements IodmsConnector {
   // logger.info(e.getMessage());
   // if (e.getClass().equals(CKANException.class))
   // handleError((CKANException) e);
-  //
+
   // }
-  //
-  //// System.out.println("New dataset size: "+newDatasetsID.length);
-  //
+
+  // // System.out.println("New dataset size: "+newDatasetsID.length);
+
   // ImmutableSet<String> newSets = ImmutableSet.copyOf(newDatasetsID);
   // ImmutableSet<String> oldSets = ImmutableSet.copyOf(oldDatasetsID);
   // logger.info(" Start to compare the new and the old lists
   // "+newSets.size()+" "+oldSets.size());
   // SetView<String> diff1 = Sets.difference(oldSets, newSets);
-  //// System.out.println("HERE__________________________________");
-  //// for(int i=0; i< newDatasetsID.length; i++){
-  //// System.out.println(i+": "+(newDatasetsID[i].equals("")?"Non
+  // // System.out.println("HERE__________________________________");
+  // // for(int i=0; i< newDatasetsID.length; i++){
+  // // System.out.println(i+": "+(newDatasetsID[i].equals("")?"Non
   // c'è":newDatasetsID[i]));
-  //// }
-  //// System.out.println("\n");
+  // // }
+  // // System.out.println("\n");
   // int deleted=0;
   // logger.info("Deleted Package " + diff1.size());
   // for (String d : diff1) {
@@ -1197,28 +1553,28 @@ public class CkanConnector implements IodmsConnector {
   // deleted++;
   // changedDatasets.put(deletedDataset, "deleted package");
   // }
-  //
+
   // /*
   // * FOR ADDED AND UPDATED DATASETS, RETRIEVES ALL DATASETS WITH METADATA
   // * CREATED AND MODIFIED AFTER THE LAST UPDATE DATE
   // */
-  //
+
   // int changed = 0;
   // int added =0;
-  //// int elses =0;
-  //
+  // // int elses =0;
+
   // int offset = 0;
   // Dataset.SearchResults result = null;
   // SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'");
   // sdf.setTimeZone(TimeZone.getTimeZone("UTC"));
   // GregorianCalendar startingDate = new GregorianCalendar();
-  //// startingDate.setTimeInMillis(node.getLastUpdateDate().getTimeInMillis());
+  // // startingDate.setTimeInMillis(node.getLastUpdateDate().getTimeInMillis());
   // startingDate.setTime(sdf.parse(startingDateString));
   // logger.info("Last update date from which to start:" +
   // startingDateString);
   // // GETS THE COUNT OF THE MATCHING DATASETS
   // int count = 0;
-  //
+
   // try {
   // count = c.findDatasets("metadata_created:[" + startingDateString + " TO
   // *] OR metadata_modified:["
@@ -1230,13 +1586,13 @@ public class CkanConnector implements IodmsConnector {
   // throw new ODMSCatalogueOfflineException("The Node is currently OFFLINE");
   // }
   // logger.info("-- CKAN Connector Response - Result TOTAL count:" + count);
-  //
+
   // while (offset < count) {
-  //
+
   // boolean retry;
   // int retryNum = 0;
   // do {
-  //
+
   // // Send the API request
   // try {
   // result = c.findDatasets(
@@ -1253,51 +1609,50 @@ public class CkanConnector implements IodmsConnector {
   // if (retryNum == 5)
   // throw new ODMSCatalogueOfflineException("The Node is currently OFFLINE");
   // }
-  //
+
   // } while (retry);
-  //
-  //// System.out.println("\n\n-----------------------------------\n\n");
+
+  // // System.out.println("\n\n-----------------------------------\n\n");
   // logger.info("-- CKAN Connector Response - Result PARTIAL count:" +
   // result.results.size());
-  //
+
   // GregorianCalendar issuedDate = new
   // GregorianCalendar(TimeZone.getTimeZone("UTC"));
   // issuedDate.setLenient(false);
   // GregorianCalendar modifiedDate = new
   // GregorianCalendar(TimeZone.getTimeZone("UTC"));
   // modifiedDate.setLenient(false);
-  //
-  //
+
   // for (Dataset d : result.results) {
   // issuedDate.setTimeInMillis(sdf.parse(parseCKANDate(d.getMetadata_created())).getTime());
   // modifiedDate.setTimeInMillis(sdf.parse(parseCKANDate(d.getMetadata_modified())).getTime());
-  //
+
   // if(oldDatasetsID.contains(d.getName())){
-  //// System.out.print(" CHANGED:\n");
+  // // System.out.print(" CHANGED:\n");
   // changedDatasets.put(datasetToDCAT(d, node), "changed package");
   // changed++;
   // }else if(newSets.contains(d.getName())){
   // changedDatasets.put(datasetToDCAT(d, node), "new package");
   // added++;
   // }
-  //
-  //// if (issuedDate.after(startingDate)) {
-  ////// System.out.println("New Package: "+issuedDate.after(startingDate));
-  //// changedDatasets.put(datasetToDCAT(d, node), "new package");
-  //// // logger.info(sdf.format(issuedDate.getTime()) + " >" +
-  //// // sdf.format(startingDate.getTime()));
-  //// added++;
-  //// } else if (modifiedDate.after(startingDate)) {
-  ////// System.out.println("Changed Package:
+
+  // // if (issuedDate.after(startingDate)) {
+  // //// System.out.println("New Package: "+issuedDate.after(startingDate));
+  // // changedDatasets.put(datasetToDCAT(d, node), "new package");
+  // // // logger.info(sdf.format(issuedDate.getTime()) + " >" +
+  // // // sdf.format(startingDate.getTime()));
+  // // added++;
+  // // } else if (modifiedDate.after(startingDate)) {
+  // //// System.out.println("Changed Package:
   // "+modifiedDate.after(startingDate));
-  //// changedDatasets.put(datasetToDCAT(d, node), "changed package");
-  ////
-  //// // logger.info(sdf.format(modifiedDate.getTime()) + " >" +
-  //// // sdf.format(startingDate.getTime()));
-  //// }
-  //
+  // // changedDatasets.put(datasetToDCAT(d, node), "changed package");
+  // //
+  // // // logger.info(sdf.format(modifiedDate.getTime()) + " >" +
+  // // // sdf.format(startingDate.getTime()));
+  // // }
+
   // }
-  //
+
   // logger.info("NodeID: "+nodeID+" Changed "+changed);
   // logger.info("NodeID: "+nodeID+" Added "+added);
   // logger.info("NodeID: "+nodeID+" Deleted "+deleted);
@@ -1306,15 +1661,14 @@ public class CkanConnector implements IodmsConnector {
   // offset += result.results.size();
   // logger.info("\n\n Collected \n\n" + result.results.size() + "new/changed
   // datasets\n");
-  //
+
   // }
-  //
-  //
+
   // c = null;
   // result = null;
   // System.gc();
   // return changedDatasets;
-  //
+
   // }
 
   /**
@@ -1370,7 +1724,12 @@ public class CkanConnector implements IodmsConnector {
     logger.info("Live query: " + query);
 
     logger.info("-- CKAN Connector Request sent --" + "ROWS: " + rows);
-    Client c = new Client(new Connection(node.getHost()), node.getApiKey());
+
+    String host = node.getHost();
+    if (!host.startsWith("http://") && !host.startsWith("https://")) {
+      host = "https://" + host;
+    }
+    Client c = new Client(new Connection(host), node.getApiKey());
     logger.info(dcatResults.size());
     Dataset.SearchResults result;
     try {
@@ -1386,41 +1745,36 @@ public class CkanConnector implements IodmsConnector {
   }
 
   /**
-   * Check if json object.
+   * Check if input is a valid JSON array.
    *
-   * @param input the input
-   * @return true, if successful
+   * @param input the input string
+   * @return true if valid JSON array, false otherwise
    */
-  private static boolean checkIfJsonObject(String input) {
-
+  public static boolean checkIfJsonArray(String input) {
     try {
-      JsonElement jelement = JsonParser.parseString(input);
-      JsonObject jobject = jelement.getAsJsonObject();
-      return true;
+      JsonElement element = JsonParser.parseString(input);
+      return element != null && element.isJsonArray();
     } catch (Exception e) {
-      logger.debug("Spatial string is not a valid GeoJson: " + e.getMessage());
+      logger.debug("Input is not a valid JSON Array: {}", e.getMessage());
       return false;
     }
   }
-  
+
   /**
-   * Check if json array.
+   * Check if input is a valid JSON object.
    *
-   * @param input the input
-   * @return true, if successful
+   * @param input the input string
+   * @return true if valid JSON object, false otherwise
    */
-  private static boolean checkIfJsonArray(String input) {
-
+  public static boolean checkIfJsonObject(String input) {
     try {
-      JsonElement jelement = JsonParser.parseString(input);
-      JsonArray jarray = jelement.getAsJsonArray();
-      return true;
+      JsonElement element = JsonParser.parseString(input);
+      return element != null && element.isJsonObject();
     } catch (Exception e) {
-      logger.debug("Spatial string is not a valid GeoJson: " + e.getMessage());
+      logger.debug("Input is not a valid JSON Object: {}", e.getMessage());
       return false;
     }
   }
-  
 
   /**
    * Gets a map of the dcat-ap data themes.
@@ -1428,7 +1782,7 @@ public class CkanConnector implements IodmsConnector {
    * @return the map
    */
   private static HashMap<String, String> dcatThemesMap() {
-    
+
     HashMap<String, String> dcatThemes = new HashMap<String, String>();
     dcatThemes.put("AGRI", "Agriculture, fisheries, forestry and food");
     dcatThemes.put("ECON", "Economy and finance");
@@ -1443,7 +1797,7 @@ public class CkanConnector implements IodmsConnector {
     dcatThemes.put("SOCI", "Population and society");
     dcatThemes.put("TECH", "Science and technology");
     dcatThemes.put("TRAN", "Transport");
-    
+
     return dcatThemes;
   }
 

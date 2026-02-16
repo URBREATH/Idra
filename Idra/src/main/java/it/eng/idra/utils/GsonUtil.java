@@ -21,6 +21,8 @@ import com.google.gson.JsonDeserializationContext;
 import com.google.gson.JsonDeserializer;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonParseException;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
 import com.google.gson.JsonPrimitive;
 import com.google.gson.JsonSerializationContext;
 import com.google.gson.JsonSerializer;
@@ -38,14 +40,21 @@ import it.eng.idra.beans.RemoteCatalogue;
 import it.eng.idra.beans.User;
 import it.eng.idra.beans.ckan.CkanErrorResponse;
 import it.eng.idra.beans.ckan.CkanSuccessResponse;
+import it.eng.idra.beans.dcat.DcatDataService;
 import it.eng.idra.beans.dcat.DcatDataset;
+import it.eng.idra.beans.dcat.DcatDatasetSeries;
+import it.eng.idra.beans.dcat.DcatDetails;
 import it.eng.idra.beans.dcat.DcatDistribution;
 import it.eng.idra.beans.dcat.DcatProperty;
 import it.eng.idra.beans.dcat.DctLicenseDocument;
+import it.eng.idra.beans.dcat.DctLocation;
+import it.eng.idra.beans.dcat.DctPeriodOfTime;
 import it.eng.idra.beans.dcat.DctStandard;
+import it.eng.idra.beans.dcat.Relationship;
 import it.eng.idra.beans.dcat.SkosConcept;
 import it.eng.idra.beans.dcat.SkosPrefLabel;
 import it.eng.idra.beans.dcat.SpdxChecksum;
+import it.eng.idra.beans.dcat.VcardOrganization;
 import it.eng.idra.beans.odms.OdmsCatalogue;
 import it.eng.idra.beans.odms.OdmsCatalogueImage;
 import it.eng.idra.beans.odms.OdmsCatalogueMessage;
@@ -281,6 +290,34 @@ public final class GsonUtil {
   public static Type ckanErrType = new TypeToken<CkanErrorResponse>() {
   }.getType();
 
+  /** The dataServiceListType. */
+  public static Type dataServiceListType = new TypeToken<List<DcatDataService>>() {
+  }.getType();
+
+  /** The dataSeriesListType. */
+  public static Type dataSeriesListType = new TypeToken<List<DcatDatasetSeries>>() {
+  }.getType();
+
+  /** The relationshipListType. */
+  public static Type relationshipListType = new TypeToken<List<Relationship>>() {
+  }.getType();
+
+  /** The detailsListType. */
+  public static Type detailsListType = new TypeToken<List<DcatDetails>>() {
+  }.getType();
+
+  /** The vcardListType. */
+  public static Type vcardListType = new TypeToken<List<VcardOrganization>>() {
+  }.getType();
+
+  /** The locationListType. */
+  public static Type locationListType = new TypeToken<List<DctLocation>>() {
+  }.getType();
+
+    /** The periodOfTimeListType. */
+  public static Type periodOfTimeListType = new TypeToken<List<DctPeriodOfTime>>() {
+  }.getType();
+
   /** The gson builder. */
   private static GsonBuilder gsonBuilder = new GsonBuilder()
       .registerTypeAdapter(ZonedDateTime.class, new JsonDeserializer<ZonedDateTime>() {
@@ -302,6 +339,9 @@ public final class GsonUtil {
           return new JsonPrimitive(property.getValue().toString());
         }
       }).registerTypeAdapter(OdmsCatalogue.class, new AnnotatedDeserializer<OdmsCatalogue>())
+        // Accept both string or object for WebScraperSitemap during deserialization
+        .registerTypeAdapter(it.eng.idra.beans.webscraper.WebScraperSitemap.class,
+          new WebScraperSitemapDeserializer())
       .registerTypeAdapter(ConfigurationParameter.class,
           new AnnotatedDeserializer<ConfigurationParameter>())
       .registerTypeAdapter(RdfPrefix.class, new AnnotatedDeserializer<RdfPrefix>())
@@ -463,6 +503,31 @@ public final class GsonUtil {
      */
     public T deserialize(JsonElement je, Type type, JsonDeserializationContext jdc)
         throws JsonParseException {
+      // Normalize known fields before delegating to Gson to handle strict types.
+      // In particular, allow OdmsCatalogue.sitemap to be either an object or a JSON string.
+      if (je != null && je.isJsonObject()) {
+        JsonObject root = je.getAsJsonObject();
+        if (root.has("sitemap")) {
+          JsonElement sitemapEl = root.get("sitemap");
+          if (sitemapEl != null && sitemapEl.isJsonPrimitive() && sitemapEl.getAsJsonPrimitive().isString()) {
+            String sitemapStr = sitemapEl.getAsString();
+            try {
+              JsonElement parsed = JsonParser.parseString(sitemapStr);
+              if (parsed != null && parsed.isJsonObject()) {
+                root.add("sitemap", parsed.getAsJsonObject());
+              } else {
+                JsonObject obj = new JsonObject();
+                obj.addProperty("startUrl", sitemapStr);
+                root.add("sitemap", obj);
+              }
+            } catch (Exception ex) {
+              JsonObject obj = new JsonObject();
+              obj.addProperty("startUrl", sitemapStr);
+              root.add("sitemap", obj);
+            }
+          }
+        }
+      }
       T pojo = new GsonBuilder()
           .registerTypeAdapter(ZonedDateTime.class, new JsonDeserializer<ZonedDateTime>() {
             public ZonedDateTime deserialize(JsonElement jsonElement, Type type,

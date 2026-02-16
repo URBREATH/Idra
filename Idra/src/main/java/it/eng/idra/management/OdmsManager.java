@@ -37,6 +37,9 @@ import it.eng.idra.dcat.dump.DcatApSerializer;
 import it.eng.idra.utils.CommonUtil;
 import it.eng.idra.utils.PropertyManager;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -60,8 +63,7 @@ public class OdmsManager {
   private static List<OdmsCatalogue> federatedNodes = new ArrayList<OdmsCatalogue>();
 
   /** The ODMS connectors list. */
-  private static HashMap<OdmsCatalogueType, String> ODMSConnectorsList = 
-      new HashMap<OdmsCatalogueType, String>();
+  private static HashMap<OdmsCatalogueType, String> ODMSConnectorsList = new HashMap<OdmsCatalogueType, String>();
   
   /** The get nodes lock. */
   private static boolean getNodesLock = false;
@@ -88,7 +90,7 @@ public class OdmsManager {
           "it.eng.idra.connectors.DcatDumpConnector");
       ODMSConnectorsList.put(OdmsCatalogueType.DKAN, "it.eng.idra.connectors.DkanConnector");
       ODMSConnectorsList.put(OdmsCatalogueType.ORION, "it.eng.idra.connectors.OrionConnector");
-      ODMSConnectorsList.put(OdmsCatalogueType.NGSILD_CB, 
+      ODMSConnectorsList.put(OdmsCatalogueType.NGSILD_CB,
           "it.eng.idra.connectors.NgsiLdCbDcatConnector");
       ODMSConnectorsList.put(OdmsCatalogueType.SPARQL, "it.eng.idra.connectors.SparqlConnector");
       ODMSConnectorsList.put(OdmsCatalogueType.SPOD, "it.eng.idra.connectors.SpodConnector");
@@ -349,6 +351,16 @@ public class OdmsManager {
 
   }
 
+  public static boolean hasDuplicateZenodoCommunity(List<OdmsCatalogue> nodes, OdmsCatalogue newNode) {
+    return "ZENODO".equalsIgnoreCase(newNode.getNodeType().toString())
+        && newNode.getCommunities() != null
+        && !newNode.getCommunities().trim().isEmpty()
+        && nodes.stream()
+            .filter(n -> "ZENODO".equalsIgnoreCase(n.getNodeType().toString()))
+            .map(OdmsCatalogue::getCommunities)
+            .anyMatch(c -> c != null && c.equalsIgnoreCase(newNode.getCommunities()));
+  }
+  
   /**
    * Adds a federated ODMS node to the Federation Sends a request to CKAN node to
    * retrieve the datasets count Updates the dataset count of the node Forwards
@@ -376,7 +388,7 @@ public class OdmsManager {
     int assignedNodeId;
     int datasetsCount = 0;
 
-    if (!federatedNodes.contains(node)) {
+    if (!federatedNodes.contains(node) || !hasDuplicateZenodoCommunity(federatedNodes, node) || node.getNodeType().equals(OdmsCatalogueType.DCATDUMP)) {
       PersistenceManager jpa = new PersistenceManager();
 
       try {
@@ -413,8 +425,18 @@ public class OdmsManager {
           /*
            * Persist the node and return the ID assigned by the Entity Manager
            */
+          logger.info("nodetype" + node.getNodeType());
+          logger.info(node.getNodeType().equals(OdmsCatalogueType.DCATDUMP));
+          
+           logger.info("Persist the node and return the ID assigned by the Entity Manager");
+           if(node.getNodeType().equals(OdmsCatalogueType.DCATDUMP) ){
+          node.setHost(createUniqueString(node));
+          logger.info(node.getHost());
+        }
           assignedNodeId = jpa.jpaInsertOdmsCatalogue(node);
           node.setId(assignedNodeId);
+        
+         
 
           /*
            * Unlock the Get nodes and add the persisted Node in the global Federated Nodes
@@ -518,6 +540,36 @@ public class OdmsManager {
     }
 
   }
+
+  public static String createUniqueString(OdmsCatalogue node) {
+        String raw =  node.getNodeType() + "-" + node.getName() + "-" + node.getRegisterDate() + "-" + node.getPublisherName();
+        return hashString(raw);
+    }
+
+    private static String hashString(String input) {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            byte[] encodedHash = digest.digest(input.getBytes(StandardCharsets.UTF_8));
+
+            // Converti in esadecimale
+            StringBuilder hexString = new StringBuilder();
+            for (byte b : encodedHash) {
+                String hex = Integer.toHexString(0xff & b);
+                if (hex.length() == 1)
+                    hexString.append('0');
+                hexString.append(hex);
+            }
+            return hexString.toString();
+
+        } catch (NoSuchAlgorithmException e) {
+            throw new RuntimeException("SHA-256 not available", e);
+        }
+    }
+
+
+
+  
+  
 
   /**
    * Gets the inactive ODMS catalogue.
@@ -633,26 +685,30 @@ public class OdmsManager {
    * @returns void
    */
   public static void updateOdmsCatalogue(OdmsCatalogue node, boolean persist)
-      throws OdmsCatalogueNotFoundException, OdmsManagerException {
 
-    if (federatedNodes.remove(node)) {
-      if (persist) {
-        PersistenceManager jpa = new PersistenceManager();
-        try {
-          jpa.jpaUpdateOdmsCatalogue(node);
-        } catch (Exception e) {
-          throw new OdmsManagerException(
-              "There " + "was an error while updating the ODMS Node: " + e.getMessage());
-        } finally {
-          jpa.jpaClose();
+    throws OdmsCatalogueNotFoundException, OdmsManagerException {
+      try {
+        if (federatedNodes.remove(node)) {
+          if (persist) {
+            PersistenceManager jpa = new PersistenceManager();
+            try {
+              jpa.jpaUpdateOdmsCatalogue(node);
+            } catch (Exception e) {
+              throw new OdmsManagerException(
+                  "There " + "was an error while updating the ODMS Node: " + e.getMessage());
+            } finally {
+              jpa.jpaClose();
+            }
+          }
+          federatedNodes.add(node);
+
+        } else {
+          throw new OdmsCatalogueNotFoundException("The ODMS node does not exist!");
         }
-      }
-      federatedNodes.add(node);
-
-    } else {
-      throw new OdmsCatalogueNotFoundException("The ODMS node does not exist!");
-    }
-
+      } catch (Exception e) {
+        throw new OdmsManagerException(
+            "There " + "was an error while updating the ODMS Node: " + e.getMessage());
+      } 
   }
 
   /**
