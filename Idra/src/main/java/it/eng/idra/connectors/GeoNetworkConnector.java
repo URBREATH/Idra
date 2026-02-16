@@ -372,7 +372,7 @@ public class GeoNetworkConnector implements IodmsConnector {
             String north = safeIsoText(bbox, new String[][]{{"gmd:northBoundLatitude","gco:Decimal"}});
             if (west!=null && east!=null && south!=null && north!=null) {
                 String bboxValue = west + "," + south + "," + east + "," + north;
-                spatialCoverage = new DctLocation(DCTerms.spatial.getURI(), "", "", "",bboxValue, nodeId,"");
+                spatialCoverage = new DctLocation(DCTerms.spatial.getURI(), "", "", bboxValue,nodeId,bboxValue, "");
             }
         }
 
