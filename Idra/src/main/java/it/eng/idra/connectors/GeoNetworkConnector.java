@@ -372,7 +372,7 @@ public class GeoNetworkConnector implements IodmsConnector {
             String north = safeIsoText(bbox, new String[][]{{"gmd:northBoundLatitude","gco:Decimal"}});
             if (west!=null && east!=null && south!=null && north!=null) {
                 String bboxValue = west + "," + south + "," + east + "," + north;
-                spatialCoverage = new DctLocation(DCTerms.spatial.getURI(), "", "", bboxValue, nodeId);
+                spatialCoverage = new DctLocation(DCTerms.spatial.getURI(), "", "", "",bboxValue, nodeId,"");
             }
         }
 
@@ -390,7 +390,7 @@ public class GeoNetworkConnector implements IodmsConnector {
                 safeIsoText(tp, new String[][]{{"gml:end","gml:TimeInstant","gml:timePosition"}})
             );
             if ((begin!=null && !begin.isEmpty()) || (end!=null && !end.isEmpty())) {
-                temporalCoverage = new DctPeriodOfTime(DCTerms.temporal.getURI(), begin, end, nodeId);
+                temporalCoverage = new DctPeriodOfTime(DCTerms.temporal.getURI(), begin, end, nodeId,null,null);
             }
         }
 
@@ -480,7 +480,7 @@ public class GeoNetworkConnector implements IodmsConnector {
         FoafAgent publisher = new FoafAgent(
                 DCTerms.publisher.getURI(),
                 null,
-                node.getPublisherName(),
+                List.of(node.getPublisherName()),
                 null, null, null,
                 null,
                 nodeId);
@@ -583,13 +583,19 @@ public class GeoNetworkConnector implements IodmsConnector {
                 new java.util.ArrayList<String>(),        // otherIdentifier
                 new java.util.ArrayList<String>(),        // sample
                 new java.util.ArrayList<String>(),        // source
-                spatialCoverage,
-                temporalCoverage,
+                (spatialCoverage == null ? new ArrayList<>() : List.of(spatialCoverage)),
+                (temporalCoverage == null ? new ArrayList<>() : List.of(temporalCoverage)),
                 "", "",                                   // type, version
                 new java.util.ArrayList<String>(),        // versionNotes
                 null, null,                               // rightsHolder, creator
                 subjectList,
-                new java.util.ArrayList<String>()         // relatedResources
+                new java.util.ArrayList<String>(),        // relatedResources,
+                new java.util.ArrayList<String>(),  //ApplacableLegislation
+                null,  //inSeries
+                null, //qualifiedRelation
+                "", //temporalResolution
+                new java.util.ArrayList<String>(), //wasGeneratedBy
+                new java.util.ArrayList<String>() //HVDCategory
         );
         return dataset;
     }
