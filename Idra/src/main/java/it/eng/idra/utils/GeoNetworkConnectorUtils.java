@@ -3,7 +3,10 @@ package it.eng.idra.utils;
 import org.w3c.dom.Element;
 import org.w3c.dom.NodeList;
 import java.net.HttpURLConnection;
+import java.net.URI;
 import java.net.URL;
+import java.time.Duration;
+
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
@@ -157,7 +160,7 @@ public class GeoNetworkConnectorUtils {
         if (p.contains("get-coverage") || p.contains("download")) return true;
 
         // File-like endings
-        if (u.matches(".*\\.(zip|7z|gz|tgz|tar|csv|tsv|xls|xlsx|json|geojson|kml|kmz|tif|tiff|geotiff|gpkg|shp)(\\?.*)?$")) return true;
+        if (u.matches(".*\\.(zip|7z|gz|tgz|tar|csv|tsv|xls|xlsx|json|geojson|kml|kmz|tif|tiff|geotiff|gpkg|shp)(\\?.*)?$") ) return true;
 
         return false;
     }
@@ -292,37 +295,77 @@ public class GeoNetworkConnectorUtils {
     }
 
     public static HttpURLConnection openFollowingRedirects(String initialUrl) throws Exception {
-        URL url = new URL(initialUrl);
+
+        if (initialUrl == null) throw new IllegalArgumentException("initialUrl is null");
+        String u = initialUrl.trim();
+        if (u.isEmpty()) throw new IllegalArgumentException("initialUrl is empty");
+
+        URL url = new URL(u);
         int redirects = 0;
+        int maxRedirects = 10;
+        int max503Retries = 2;
+        int retry503 = 0;
+
         while (true) {
             HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+            // We will follow redirects manually so we can handle protocol/relative Location correctly
             conn.setInstanceFollowRedirects(false);
             conn.setConnectTimeout(30000);
             conn.setReadTimeout(30000);
-            conn.setRequestMethod("GET");
             conn.setRequestProperty("Accept", "application/xml");
             conn.setRequestProperty("User-Agent", "Idra-CSW-Connector/1.0");
+            conn.setRequestMethod("GET");
+            conn.connect();
+
             int code = conn.getResponseCode();
-            String loc = conn.getHeaderField("Location");
-            String ct  = conn.getContentType();
-            logger.info("CSW hop code={} url='{}' location='{}' contentType='{}'", code, conn.getURL(), loc, ct);
-            if (code == HttpURLConnection.HTTP_OK) {
+            String ct = conn.getContentType();
+
+            logger.info("CSW code={} url='{}' contentType='{}'", code, url.toString(), ct);
+
+            // Successful
+            if (code >= 200 && code < 300) {
                 if (ct != null && ct.toLowerCase().contains("text/html")) {
                     conn.disconnect();
                     throw new Exception("Unexpected HTML response (possible portal/login)");
                 }
                 return conn;
             }
-            if (code == HttpURLConnection.HTTP_MOVED_PERM   ||
-                code == HttpURLConnection.HTTP_MOVED_TEMP   ||
-                code == HttpURLConnection.HTTP_SEE_OTHER    ||
-                code == 307 || code == 308) {
-                if (loc == null || loc.isEmpty()) { conn.disconnect(); throw new Exception("Redirect without Location header"); }
-                url = new URL(url, loc);
+
+            // Redirects
+            if (code == HttpURLConnection.HTTP_MOVED_PERM /*301*/
+                    || code == HttpURLConnection.HTTP_MOVED_TEMP /*302*/
+                    || code == HttpURLConnection.HTTP_SEE_OTHER /*303*/
+                    || code == 307 /*HTTP/1.1 307*/
+                    || code == 308 /*HTTP/1.1 308*/) {
+                String loc = conn.getHeaderField("Location");
                 conn.disconnect();
-                if (++redirects > 8) throw new Exception("Too many redirects");
+                if (loc == null || loc.trim().isEmpty()) {
+                    throw new Exception("Redirect (" + code + ") without Location header");
+                }
+                // Resolve relative redirects against the current URL
+                URL next = new URL(url, loc);
+                redirects++;
+                if (redirects > maxRedirects) {
+                    throw new Exception("Too many redirects");
+                }
+                url = next;
+                // reset 503 retry counter when we change URL
+                retry503 = 0;
                 continue;
             }
+
+            // 503 Service Unavailable: allow a small number of retries with short backoff
+            if (code == HttpURLConnection.HTTP_UNAVAILABLE) {
+                conn.disconnect();
+                if (retry503 < max503Retries) {
+                    retry503++;
+                    try { Thread.sleep(1000L * retry503); } catch (InterruptedException ie) { Thread.currentThread().interrupt(); }
+                    continue;
+                }
+                throw new Exception("HTTP 503 Service Unavailable after retries");
+            }
+
+            // Other errors
             conn.disconnect();
             throw new Exception("HTTP " + code);
         }
