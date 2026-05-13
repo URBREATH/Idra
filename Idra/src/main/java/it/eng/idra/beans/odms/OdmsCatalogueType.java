@@ -51,5 +51,7 @@ public enum OdmsCatalogueType {
   /** The Geonetwork. */
   GEONETWORK_ISO19139,
   /** The NBSRegistry.  */
-  NBS_REGISTRY
+  NBS_REGISTRY,
+  /** The Copernicus catalogue. */
+  COPERNICUS_STAC
 }

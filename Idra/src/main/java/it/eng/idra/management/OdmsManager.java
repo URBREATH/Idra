@@ -100,6 +100,7 @@ public class OdmsManager {
       ODMSConnectorsList.put(OdmsCatalogueType.ZENODO, "it.eng.idra.connectors.ZenodoConnector");
       ODMSConnectorsList.put(OdmsCatalogueType.GEONETWORK_ISO19139, "it.eng.idra.connectors.GeoNetworkConnector");
       ODMSConnectorsList.put(OdmsCatalogueType.NBS_REGISTRY, "it.eng.idra.connectors.NbsRegistryConnector");
+      ODMSConnectorsList.put(OdmsCatalogueType.COPERNICUS_STAC, "it.eng.idra.connectors.CopernicusConnector");
     } catch (Exception e) {
       e.printStackTrace();
     }
