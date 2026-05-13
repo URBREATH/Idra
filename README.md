@@ -98,7 +98,7 @@ to provide feedback.
 
 ##### Contacts
 
--   Martino Maggio: [_martino.maggio@eng.it_](mailto:martino.maggio@eng.it)
+-   Rita Gaeta: [_rita.gaeta@eng.it_](mailto:rita.gaeta@eng.it)
 -   Giuseppe Ciulla: [_giuseppe.ciulla@eng.it_](mailto:giuseppe.ciulla@eng.it)
 
 ---
@@ -126,3 +126,6 @@ wish to make a clarifying public statement as follows:
 > work of the product. Software that merely uses or aggregates (i.e. links to) an otherwise 
 > unmodified version of existing software is not considered a derivative work, and therefore
 > it does not need to be released as under the same license, or even released as open source.
+
+## Dependencies
+IDRA relies on MySQL as relational database, RDF4J for RDF repository and semantic data handling, and Orion NGSI Broker for NGSI-based context management.
